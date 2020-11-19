@@ -1,0 +1,430 @@
+float opUnion( float d1, float d2 ) { return min(d1,d2); }
+
+float opSmoothUnion( float d1, float d2, float k ) {
+    float h = clamp( 0.5 + 0.5*(d2-d1)/k, 0.0, 1.0 );
+    return mix( d2, d1, h ) - k*h*(1.0-h); }
+
+float tree_2d_sdf(vec3 p, vec2 base)
+{
+    float dist = 10000000.f;
+
+    float dy = 2.f;
+    vec3 axis = vec3(0.0, 1.0, 0.0);
+
+    dist = min(dist, sdCappedCylinder(p, vec3(0.0), axis * dy, 0.1));
+    dist += 0.6*sin(3.f*p.x) * sin(3.f*p.y) * sin(3.f*p.z);
+    dist = min(dist, sdSphere(p - vec3(0.0, 2.5, 0.0), 0.5));
+
+    float hash_x = 321.129 * (base.x + 1.123f);
+    float hash_y = 914.443 * (base.y + 54.6f);
+    float hash_z = 768.892 * (base.x + base.y + 923.5);
+
+    vec3 base_loc = axis * (dy + 0.5);
+
+    for (float i = 0.0; i < 6.f; i += 1.f)
+    {
+        vec3 rand = vec3(2.f * hash11(i * hash_x) - 1.f,
+                         2.f * hash11(i * hash_y) - 1.f,
+                         2.f * hash11(i * hash_z) - 1.f);
+        rand = normalize(rand);
+        vec3 loc = base_loc + rand * dy * 0.3;
+
+        dist = min(dist, sdCappedCylinder(p,
+                                          base_loc,
+                                          loc, 0.02));
+
+        dist = min(dist, opSmoothUnion(dist, sdSphere(p - (base_loc + rand * (dy * 0.3 + 0.05)), 0.04 * cos(iTime + hash_x) + 0.12), 0.12f));
+    }
+
+    return min(sdCappedCylinder(p,
+                               	vec3(4.0, -1.6, 0.0), vec3(-4.0, -1.6, 0.0), 2.0), dist);
+}
+
+vec3 flat_domain_repetition(vec3 p, vec2 bounds, out vec2 base)
+{
+    base = floor(p.xz + 0.5 * bounds / bounds);
+
+ 	vec2 uv = mod(p.xz + 0.5 * bounds, bounds) - 0.5 * bounds;
+
+    return vec3(uv.x, p.y, uv.y);
+}
+
+float map(vec3 p, out int render_type)
+{
+    vec2 base = vec2(0.f, 0.f);
+    vec3 flat_world_p = flat_domain_repetition(p, vec2(4.0, 4.0), base);
+    float dist = tree_2d_sdf(flat_world_p, base);
+
+    return min(dist, sdPlane(p, 0.0));
+}
+
+vec3 computeNormal(vec3 p)
+{
+    vec3 eps = vec3(EPSILON,0.0,0.0);
+    int tmp = 0;
+    vec3 normal = normalize( vec3(
+        map(p+eps.xyy, tmp) - map(p-eps.xyy, tmp),
+        map(p+eps.yxy, tmp) - map(p-eps.yxy, tmp),
+        map(p+eps.yyx, tmp) - map(p-eps.yyx, tmp)));
+
+    return normal;
+}
+
+bool sphere_tracing(ray r,
+               		int max_iter,
+               		out int render_type,
+               		out vec3 hit_loc,
+               		out int iters)
+{
+    hit_loc = r.origin;
+    bool hit = false;
+
+    float dist = 0.0;
+    int i = 0;
+
+    for (; i < max_iter; ++i)
+    {
+        int rt = -1;
+        vec3 p = r.origin + r.direction * dist;
+
+        float next_step = map(p, rt);
+
+        if (next_step < EPSILON)
+        {
+            hit_loc = p;
+            iters = i;
+            render_type = rt;
+            return true;
+        }
+
+        dist += next_step;
+    }
+
+    iters = i;
+
+    return false;
+}
+
+/*float soft_shadow(ray r,
+                  int max_iter,
+               	  settings setts,
+                  float k)
+{
+    bool hit = false;
+
+    float res = 1.0;
+    int i = 0;
+    float dist = 0.0;
+
+    for (; i < max_iter; ++i)
+    {
+        vec3 p = r.origin + r.direction * dist;
+
+        float next_step = map(p, setts);
+
+        res = min( res, k*next_step/(dist) );
+        dist += next_step;
+
+
+        if (next_step < EPSILON)
+        {
+            return 0.0;
+        }
+    }
+
+    return min(res, 1.0);
+}*/
+
+vec3 shade(vec3 p, int iters, int render_type)
+{
+    /*if (setts.shade_mode == GRID)
+    {
+    	float res = 0.2;
+    	float one = abs(mod(p.x, res) - res / 2.0);
+    	float two = abs(mod(p.y, res) - res / 2.0);
+    	float three = abs(mod(p.z, res) - res / 2.0);
+    	float interp = min(one, min(two, three)) / res;
+
+        // we added an attenuation term based on distance so that the infinite domain repetition
+        // in space is visually comprehendable.
+        //float dist_attenuation = exp(-0.07 * dist);
+
+        return mix( vec3(0.2, 0.5, 1.0), vec3(0.1, 0.1, 0.1), smoothstep(0.0,0.05,abs(interp)) );
+    }
+    else if (setts.shade_mode == COST)
+    {
+        return vec3(float(iters) / float(cost_norm));
+    }*/
+    if (render_type == 0)
+    {
+        vec3 eps = vec3(EPSILON,0.0,0.0);
+        vec3 normal = computeNormal(p);
+
+        //return vec3(0.0, 1.0, 0.0);
+
+        return (normal + vec3(1.0)) * 0.5;
+    }
+    /*else if (setts.shade_mode == AMBIENT)
+    {
+     	// they will have to implement this
+        vec3 dir_to_light = normalize(two_tone_dir);
+
+        vec3 normal = computeNormal(p, setts);
+
+        float theta = acos(dot(dir_to_light, normal));
+
+        if (theta < PI * 0.5)
+        {
+            return (1.0 - sin(theta) * 0.5) * two_tone_color_a +
+                   sin(theta) * 0.5 * two_tone_color_b;
+        }
+        else
+        {
+            return (1.0 - sin(theta) * 0.5) * two_tone_color_b +
+                   sin(theta) * 0.5 * two_tone_color_a;
+        }
+    }
+    else if (setts.shade_mode == DIFFUSE_POINT)
+    {
+        vec3 light_pos = vec3(0.0, 5.0, 0.0);
+        vec3 light_intensity = vec3(5.0);
+        vec3 surface_color = vec3(0.5);
+
+        vec3 surface_to_light = light_pos - p;
+        float sqr_dist = dot(surface_to_light, surface_to_light);
+        surface_to_light = normalize(surface_to_light);
+
+        vec3 normal = computeNormal(p, setts);
+
+        float diffuseCoefficient = max(0.0, dot(normal, surface_to_light));
+
+        return diffuseCoefficient * surface_color * light_intensity / sqr_dist;
+    }
+    else if (setts.shade_mode == DIFFUSE_POINT_HARD_SHADOWS)
+    {
+        vec3 light_pos = vec3(0.0, 5.0, 0.0);
+        vec3 light_intensity = vec3(5.0);
+        vec3 surface_color = vec3(0.5);
+
+        vec3 surface_to_light = light_pos - p;
+        float sqr_dist = dot(surface_to_light, surface_to_light);
+        surface_to_light = normalize(surface_to_light);
+
+        vec3 normal = computeNormal(p, setts);
+
+        float diffuseCoefficient = max(0.0, dot(normal, surface_to_light));
+
+        vec3 orig = p + EPSILON * normal;
+        ray shadow_ray = ray(orig, surface_to_light);
+        vec3 hit2;
+        int iters2;
+        if (sphere_tracing(shadow_ray,
+                           100,
+                           setts,
+                           hit2,
+                           iters2))
+        {
+            return vec3(0.0);
+        }
+
+        return diffuseCoefficient * surface_color * light_intensity / sqr_dist;
+    }
+    else if (setts.shade_mode == DIFFUSE_DIR_HARD_SHADOWS)
+    {
+        vec3 light_dir = normalize(vec3(-1.0, -1.0, 0.0));
+        vec3 light_color = vec3(0.8);
+        vec3 surface_color = vec3(0.5);
+
+        vec3 normal = computeNormal(p, setts);
+
+        float diffuseCoefficient = max(0.0, dot(normal, -light_dir));
+
+        float sdf = abs(map(p, setts));
+
+        vec3 orig = p + EPSILON * normal;
+        ray shadow_ray = ray(orig, -light_dir);
+        vec3 hit2;
+        int iters2;
+        if (sphere_tracing(shadow_ray,
+                           100,
+                           setts,
+                           hit2,
+                           iters2))
+        {
+            return vec3(0.0);
+        }
+
+        return diffuseCoefficient * surface_color * light_color;
+    }
+    else if (setts.shade_mode == DIFFUSE_POINT_SOFT_SHADOWS)
+    {
+        vec3 light_pos = vec3(0.0, 5.0, 0.0);
+        vec3 light_intensity = vec3(20.0);
+        vec3 surface_color = vec3(0.5);
+        float shadow_k = 1.0;
+
+        vec3 surface_to_light = light_pos - p;
+        float sqr_dist = dot(surface_to_light, surface_to_light);
+        surface_to_light = normalize(surface_to_light);
+
+        vec3 normal = computeNormal(p, setts);
+
+        float diffuseCoefficient = max(0.0, dot(normal, surface_to_light));
+
+        vec3 orig = p + EPSILON * normal;
+        ray shadow_ray = ray(orig, surface_to_light);
+
+        float shadow_coefficient = soft_shadow(shadow_ray,
+                                               100,
+                                               setts,
+                                               shadow_k);
+
+        return shadow_coefficient * diffuseCoefficient * surface_color * light_intensity / sqr_dist;
+    }
+    else if (setts.shade_mode == DIFFUSE_DIR_SOFT_SHADOWS)
+    {
+        vec3 light_dir = normalize(vec3(-1.0, -1.0, 0.0));
+        vec3 light_color = vec3(0.8);
+        vec3 surface_color = vec3(0.5);
+        float shadow_k = 1.0;
+
+        vec3 normal = computeNormal(p, setts);
+
+        float diffuseCoefficient = max(0.0, dot(normal, -light_dir));
+
+        vec3 orig = p + EPSILON * normal;
+        ray shadow_ray = ray(orig, -light_dir);
+
+        float shadow_coefficient = soft_shadow(shadow_ray,
+                                               100,
+                                               setts,
+                                               shadow_k);
+
+        return shadow_coefficient * diffuseCoefficient * surface_color * light_color;
+    }
+    else if (setts.shade_mode == SCENE_DIFFUSE_AMBIENT || setts.shade_mode == SCENE_DIFFUSE_AMBIENT_REFLECT)
+    {
+        vec3 point_light_pos = vec3(0.0, 5.0, 0.0);
+        vec3 point_light_intensity = vec3(10.0, 9.0, 4.0);
+
+        vec3 dir_light_dir = normalize(vec3(-1.0, -1.0, 0.0));
+        vec3 dir_light_color = vec3(0.6 * 0.75, 0.5 * 0.75, 0.1 * 0.75);
+
+        vec3 surface_color = vec3(0.5);
+
+        float shadow_k = 1.0;
+        float ambient_coefficient = 0.1;
+
+
+        vec3 surface_to_pointlight = point_light_pos - p;
+        float sqr_dist = dot(surface_to_pointlight, surface_to_pointlight);
+        surface_to_pointlight = normalize(surface_to_pointlight);
+
+        vec3 normal = computeNormal(p, setts);
+
+        float point_diffuseCoefficient = max(0.0, dot(normal, surface_to_pointlight));
+        float dir_diffuseCoefficient = max(0.0, dot(normal, -dir_light_dir));
+
+        vec3 orig = p + EPSILON * normal;
+        ray point_shadow_ray = ray(orig, surface_to_pointlight);
+        ray dir_shadow_ray = ray(orig, -dir_light_dir);
+
+        float point_shadow_coefficient = soft_shadow(point_shadow_ray,
+                                                     100,
+                                                     setts,
+                                                     shadow_k);
+
+        float dir_shadow_coefficient = soft_shadow(dir_shadow_ray,
+                                                     100,
+                                                     setts,
+                                                     shadow_k);
+
+        vec3 dir_to_amblight = normalize(two_tone_dir);
+        vec3 ambient_term;
+
+        float theta = acos(dot(dir_to_amblight, normal));
+
+        if (theta < PI * 0.5)
+        {
+            ambient_term = (1.0 - sin(theta) * 0.5) * two_tone_color_a +
+                   sin(theta) * 0.5 * two_tone_color_b;
+        }
+        else
+        {
+            ambient_term = (1.0 - sin(theta) * 0.5) * two_tone_color_b +
+                   sin(theta) * 0.5 * two_tone_color_a;
+        }
+
+        return dir_shadow_coefficient * dir_diffuseCoefficient * surface_color * dir_light_color +
+               point_shadow_coefficient * point_diffuseCoefficient * surface_color * point_light_intensity / sqr_dist +
+               ambient_coefficient * ambient_term * 0.0;
+    }
+    else
+    {
+        return vec3(0.0);
+    }*/
+
+    return vec3(0.0);
+}
+
+vec3 render(vec2 fragCoord)
+{
+    vec2 p = (2.0*fragCoord-iResolution.xy)/iResolution.y;
+
+    if (p.y < -0.95)
+    {
+        float val = cos(iTime * anim_speed);
+        return shade_progress_bar(p, iResolution.xy, val);
+    }
+
+    camera cam;
+
+    float time = iTime;
+
+    cam = camera_const(vec3(20.0 + time, 8.0, -time),
+ 			           vec3(0.0 + time, 2.0, -time),
+                       vec3(0.0, 1.0, 0.0),
+                       20.0,
+                       640.0 / 360.0,
+                       0.0,
+                       sqrt(27.0));
+
+    vec2 uv = fragCoord/iResolution.xy;
+    ray r = camera_get_ray(cam, uv);
+
+    int max_iter = 1000;
+
+    vec3 col = vec3(0.0);
+
+    vec3 hit_loc;
+    int iters;
+    bool hit;
+
+    int render_type = -1;
+
+    if (sphere_tracing(r, max_iter, render_type, hit_loc, iters))
+    {
+        col = shade(hit_loc, iters, render_type);
+    }
+
+    /*if (setts.shade_mode == SCENE_DIFFUSE_AMBIENT_REFLECT)
+    {
+        // cast a reflection ray
+        vec3 normal = computeNormal(hit_loc, setts);
+
+        ray reflect_ray = ray(hit_loc + EPSILON * normal,
+                              reflect(r.direction, normal));
+
+        if (sphere_tracing(reflect_ray, max_iter, setts, hit_loc, iters))
+        {
+            col += 0.15 * shade(hit_loc, iters, setts);
+        }
+    }*/
+
+    return pow(col, vec3(1.0 / 2.2));
+}
+
+void mainImage(out vec4 fragColor, in vec2 fragCoord)
+{
+    fragColor = vec4(render(fragCoord), 1.0);
+}
