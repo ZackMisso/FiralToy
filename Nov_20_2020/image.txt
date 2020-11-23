@@ -1,0 +1,33 @@
+float dist(vec2 p1, vec2 p2, float time)
+{
+    vec2 vec = p1 - p2;
+    float dist_one = length(vec);
+    float dist_two = max(abs(vec.x), abs(vec.y));
+
+    return mix(dist_one, dist_two, 0.375);
+
+    return dist_two;
+}
+
+float map(vec2 p, float time)
+{
+    float min_dist = 100000000000.f;
+
+    for (int i = 0; i < 200; ++i)
+    {
+        vec2 p0 = texture(iChannel0, vec2(float(i) / iResolution.x, 0.0)).xy;
+        min_dist = min(min_dist, dist(p, p0, time));
+    }
+
+    return min_dist;
+}
+
+void mainImage( out vec4 fragColor, in vec2 fragCoord )
+{
+    vec2 uv = fragCoord/iResolution.xy;
+    float time = 0.5 * iTime;
+    float base_col = map(uv * 0.5 + vec2(0.25) + vec2(0.2* cos(time), 0.2 * sin(time)), time) * 0.8;
+    vec3 col = vec3(1.0, 0.1f - base_col, 1.0);
+    col = exp(-20.f * col);
+    fragColor = vec4(pow(col, vec3(1.0 / 2.2)), 1.0);
+}

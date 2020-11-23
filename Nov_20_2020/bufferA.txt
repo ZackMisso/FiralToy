@@ -1,0 +1,33 @@
+vec2 displace(vec2 p, float time)
+{
+ 	p += 1.0 * vec2(time * sin(p.x + p.y), time *  cos(p.x - p.y));
+    p = fract(p);
+
+    return p;
+}
+
+void mainImage( out vec4 fragColor, in vec2 fragCoord )
+{
+    vec2 uv = fragCoord;
+    float time = 0.2 * iTime;
+
+    if (uv.y > 1.f) return;
+
+    int rngSeed = SEED;
+    vec2 p0 = vec2(0.0);
+
+    for (int i = 0; i <= int(uv.x + 0.3f); ++i)
+    {
+        p0 = vec2(nextVec2(rngSeed)) - vec2(0.5, 0.5);
+    }
+
+    vec3 last_val = texture(iChannel0, uv).xyz;
+
+    p0 += last_val.xy;
+
+    // now displace
+    p0 = displace(p0, time);
+
+
+    fragColor = vec4(p0.x, p0.y, time, 1.0);
+}
